@@ -30,75 +30,171 @@
 (require 'treesit)
 (require 'erlang)
 
-
-(defvar erlang-ts-keywords erlang-keywords)
+(defvar erlang-ts-keywords
+  '("after"
+    "begin"
+    "catch"
+    "case"
+;;    "cond"   ;; reserved but not included in tree-sitter grammer
+    "end"
+    "fun"
+    "if"
+;;    "let"    ;; reserved but not included in tree-sitter grammer
+    "of"
+    "receive"
+    "try"
+    "maybe"
+    "else"
+    "when")
+  "Erlang reserved keywords")
 
 (defvar erlang-ts-font-lock-rules
-  '(;; HTML font locking
-    :language erlang
-    :feature string
-    ((string) @font-lock-string-face)
+  (treesit-font-lock-rules
+   :language 'erlang
+   :feature 'string
+   `((string) @font-lock-string-face)
 
-    :language erlang
-    :feature comment
-    ((comment) @font-lock-comment-face)
+   :language 'erlang
+   :feature 'comment
+   `((comment) @font-lock-comment-face)
 
-    :language erlang
-    :feature variable
-    ((var) @font-lock-variable-name-face)
+   :language 'erlang
+   :feature 'keyword
+   `([,@erlang-ts-keywords] @font-lock-keyword-face)
 
-    :language erlang
-    :feature keyword
-    ;;([,@erlang-ts-keywords] @font-lock-keyword-face)
-    ("when" @font-lock-keyword-face)
+   :language 'erlang
+   :feature 'operator-atoms
+   ;; We use keyword-face here because by default
+   ;; operator-font is black and we want to differ between atoms and builtins
+   `([,@erlang-operators] @font-lock-keyword-face)
 
-    ;; :language erlang
-    ;; :feature operator
-    ;; ([,@erlang-operators] @font-lock-operator-face)
+   :language 'erlang
+   :feature 'type
+   :override t
+   `(
+     ;; Fixing types which looks like calls using :pred  (slow?)
+     ;;  (and it doesn't work for some reason, but works when tested with (treesit-query-capture ..
+     (call expr: (_) @font-lock-type-face (:pred erlang-ts-paren-is-type @font-lock-type-face))
+     (type_name name: (atom) @font-lock-type-face)
+     (export_type_attribute types: (fa fun: (atom) @font-lock-type-face))
+     (record_decl name: (atom) @font-lock-type-face)
+     (record_expr name: (record_name name: (atom) @font-lock-type-face))
+     )
 
-    ;; :language erlang
-    ;; :feature builtin
-    ;; ([,@erlang-guards @erlang-int-bifs] @font-lock-builtin-face)
+   :language 'erlang
+   :feature 'definition
+   `((function_clause name: (atom) @font-lock-function-name-face)
+     (spec fun: (atom) @font-lock-function-name-face)
+     (fa fun: (atom) @font-lock-function-name-face)
+     (binary_op_expr lhs: (atom) @font-lock-function-name-face "/" rhs: (integer))
+     (internal_fun fun: (atom) @font-lock-function-name-face)
+     )
 
-    )
-    ;; ((script_element
-    ;;   [(start_tag (tag_name) @font-lock-doc-face)
-    ;;    (end_tag (tag_name) @font-lock-doc-face)]))
+   :language 'erlang
+   :feature 'guards
+   `((call expr: (atom) @font-lock-builtin-face
+           (:match ,erlang-guards-regexp @font-lock-builtin-face)))
 
-    ;; :language html
-    ;; :feature tag
-    ;; ([(start_tag (tag_name) @font-lock-function-call-face)
-    ;;   (self_closing_tag (tag_name) @font-lock-function-call-face)
-    ;;   (end_tag (tag_name)  @font-lock-function-call-face)])
-    ;; :language html
-    ;; :override t
-    ;; :feature tag
-    ;; ((doctype) @font-lock-keyword-face))
-  )
+   :language 'erlang
+   :feature 'builtin
+   `((call expr: (atom) @font-lock-builtin-face (:match ,erlang-int-bif-regexp @font-lock-builtin-face))
+     (call expr: (remote module:
+                         (remote_module module: (atom) @module (:equal "erlang" @module))
+                         fun: (atom) @fun (:match ,erlang-ext-bif-regexp @fun)) @font-lock-builtin-face))
+
+   :language 'erlang
+   :feature 'preprocessor
+   :override t
+   `((wild_attribute name: (_) @font-lock-preprocessor-face)
+     (pp_define lhs: (macro_lhs name: (_) @font-lock-preprocessor-face))
+     (macro_call_expr name: (_) @font-lock-preprocessor-face)
+     (["module" "export" "import" "compile" "define" "record"
+       "spec" "type" "export_type" "opaque"]
+      @font-lock-preprocessor-face)
+     )
+
+   :language 'erlang
+   :feature 'constant
+   `(((atom) @font-lock-constant-face (:match "^'.*" @font-lock-constant-face))
+     ((char) @font-lock-constant-face (:match "^$.*" @font-lock-constant-face)))
+
+   :language 'erlang
+   :feature  'index-atom
+   `((record_field name: (atom) @font-lock-property-use-face))
+
+   :language 'erlang
+   :feature 'number
+   `((integer) @font-lock-number-face
+     (float) @font-lock-number-face)
+
+   :language 'erlang
+   :feature 'variable
+   `((var) @font-lock-variable-name-face)
+
+   :language 'erlang
+   :feature 'function-call
+   `((call expr:  (_) @font-lock-function-call-face))
+
+   :language 'erlang
+   :feature 'bracket
+   '((["(" ")" "[" "]" "{"  "{" "}" "<<" ">>"]) @font-lock-bracket-face)
+
+   :language 'erlang
+   :feature 'delimiter
+   '((["." "," ";" "|"]) @font-lock-delimiter-face)
+
+   :language 'erlang
+   :feature 'operator
+   ;; Add "<:-" "<:=" "&&"  when available in tree-sitter
+   '(([ "->" "||" "<-" "<=" "+" "-" "*" "/" "++" ">" ">=" "<" "=<" "=" "==" "=:=" "=/="])
+     @font-lock-operator-face)
+   )
+
+  "Tree-sitter font-lock settings for `erlang-ts-mode'.
+   Use `treesit-font-lock-level' or `treesit-font-lock-feature-list' to change settings")
+
+(defun erlang-ts-paren-is-type (node)
+  (let ((type (treesit-node-type node)))
+    (cond ((member type '("type_alias" "ann_type" "type_sig" "opaque" "field_type"))
+           t)
+          (type nil)
+          (t
+           (erlang-ts-paren-is-type (treesit-node-parent node)))
+          )))
 
 (defun erlang-ts-setup ()
   "Setup treesit for erlang"
 
-  (setq-local treesit-font-lock-settings
-              (apply #'treesit-font-lock-rules
-                     erlang-ts-font-lock-rules))
+  (setq-local treesit-font-lock-settings erlang-ts-font-lock-rules)
 
   (setq-local font-lock-defaults nil)
   (setq-local treesit-font-lock-feature-list
               '(
-                (string)
-                (comment)
-                (variable)
-                (keyword)
-                (operator)
-                (builtin)
-                (preprocessor)
-                (definition)
-                (type)
-                (doc)
+                (string             ;; Level 1
+                 comment
+                 keyword
+                 doc
+                 )
+                (preprocessor       ;; Level 2
+                 operator-atoms
+                 definition
+                 type
+                 )
+                (builtin            ;; Level 3
+                 variable
+                 guards
+                 constant
+                 )
+                (operator           ;; Level 4
+                 delimiter
+                 bracket
+                 number
+                 function-call
+                 index-atom
+                 )
                 ))
 
-  (setq-local treesit-font-lock-level 4)
+  (setq-local treesit-font-lock-level 5)
 
   ;; (setq-local treesit-simple-indent-rules erlang-ts-indent-rules)
 
@@ -119,3 +215,5 @@
 
 (provide 'erlang-ts)
 ;;; erlang-ts-mode.el ends here
+
+
