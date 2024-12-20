@@ -30,6 +30,28 @@
 (require 'treesit)
 (require 'erlang)
 
+(defun erlang-font-lock-level-1 ()
+  (interactive)
+  (erlang-ts-set-font-lock-level 1))
+
+(defun erlang-font-lock-level-2 ()
+  (interactive)
+  (erlang-ts-set-font-lock-level 2))
+
+(defun erlang-font-lock-level-3 ()
+  (interactive)
+  (erlang-ts-set-font-lock-level 3))
+
+(defun erlang-font-lock-level-4 ()
+  (interactive)
+  (erlang-ts-set-font-lock-level 4))
+
+(defun erlang-ts-set-font-lock-level (level)
+  (setq treesit-font-lock-level level)
+  (message '("Set font-level" level))
+  (treesit-font-lock-recompute-features)
+  (treesit-font-lock-fontify-region (point-min) (point-max)))
+
 (defvar erlang-ts-keywords
   '("after"
     "begin"
@@ -51,6 +73,13 @@
 (defvar erlang-ts-font-lock-rules
   (treesit-font-lock-rules
    :language 'erlang
+   :feature 'doc
+   `((wild_attribute name: (attr_name name: (atom) @name (:equal "doc" @name))
+                     value: (string) @font-lock-doc-face)
+     (wild_attribute name: (attr_name name: (atom) @name (:equal "moduledoc" @name))
+                     value: (string) @font-lock-doc-face))
+
+   :language 'erlang
    :feature 'string
    `((string) @font-lock-string-face)
 
@@ -71,9 +100,7 @@
    :language 'erlang
    :feature 'type
    :override t
-   `(
-     ;; Fixing types which looks like calls using :pred  (slow?)
-     ;;  (and it doesn't work for some reason, but works when tested with (treesit-query-capture ..
+   `(  ;; Might be slow but don't know a better way to do it
      (call expr: (_) @font-lock-type-face (:pred erlang-ts-paren-is-type @font-lock-type-face))
      (type_name name: (atom) @font-lock-type-face)
      (export_type_attribute types: (fa fun: (atom) @font-lock-type-face))
@@ -157,7 +184,7 @@
   (let ((type (treesit-node-type node)))
     (cond ((member type '("type_alias" "ann_type" "type_sig" "opaque" "field_type"))
            t)
-          (type nil)
+          ((not type) nil)
           (t
            (erlang-ts-paren-is-type (treesit-node-parent node)))
           )))
@@ -194,9 +221,17 @@
                  )
                 ))
 
-  (setq-local treesit-font-lock-level 5)
+  (setq-local treesit-font-lock-level 4)
 
   ;; (setq-local treesit-simple-indent-rules erlang-ts-indent-rules)
+
+  (if lsp-language-id-configuration
+      (add-to-list 'lsp-language-id-configuration
+                   '(erlang-ts-mode . "erlang")))
+
+  (dolist (r '("\\.erl$" "\\.app\\.src$" "\\.escript"
+               "\\.hrl$" "\\.xrl$" "\\.yrl" "/ebin/.+\\.app"))
+    (add-to-list 'auto-mode-alist (cons r 'erlang-ts-mode)))
 
   (treesit-major-mode-setup))
 
@@ -204,10 +239,6 @@
 (define-derived-mode erlang-ts-mode erlang-mode "erl-ts"
   "Major mode for editing erlang with tree-sitter."
   :syntax-table erlang-mode-syntax-table
-
-  ;;(setq-local font-lock-defaults nil)
-  (add-to-list 'lsp-language-id-configuration
-               '(erlang-ts-mode . "erlang"))
 
   (when (treesit-ready-p 'erlang)
     (treesit-parser-create 'erlang)
