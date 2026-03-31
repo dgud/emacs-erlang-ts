@@ -764,13 +764,44 @@ The return value is suitable for `treesit-simple-indent-rules'."
      ((parent-is "type_sig") parent-bol erlang-indent-level)
 
      ;; Top-level: column 0
-     ((parent-is "source_file") column-0 0)
+     ((parent-is "source_file") erlang-ts--top-level erlang-ts--indent-offset)
 
      ;; Error recovery
-     ((parent-is "ERROR") parent-bol erlang-indent-level)
+     ((parent-is "ERROR") erlang-ts--indent-error erlang-ts--indent-offset)
 
      ;; Catch-all: preserve previous line indentation
      (no-node prev-line 0))))
+
+(defun erlang-ts--indent-top-level (_node _parent _bol &rest _)
+  "Return anchor point for top level.
+Top level is invoked either on top level or after an incomplete
+construction, tries to figure out if `point' is on top level or not.
+If top-level return 0 and sets `erlang-ts--indent-offset' to 0,
+if not invokes `erlang-ts--indent-guess' with previous tree node"
+  
+  (erlang-ts--indent-guess (treesit-node-parent parent)))
+
+
+(defun erlang-ts--indent-error (_node parent _bol &rest _)
+  "Best effort guessing anchor point from PARENT.
+Invokes erlang-ts--indent-guess which returns an anchor point and
+also sets `erlang-ts--indent-offset'"
+  (erlang-ts--indent-guess (treesit-node-parent parent)))
+
+(defun erlang-ts--indent-guess (node)
+  "Guess an anchor point depending on NODE.
+Also sets `erlang-ts--indent-offset'."
+  (setq-local erlang-ts--indent-offset erlang-indent-level)
+  (let* ((gp (treesit-node-parent parent))
+         (type (treesit-node-type gp)))
+    (cond ((equal "source-file" type)
+           (setq-local erlang-ts--indent-offset 0)
+           0)
+          ((equal "function_clause" type)
+           (treesit-node-start gp))
+          (t
+           (message "erlang-ts guess: unhandled %s" type)
+           (treesit-node-start gp)))))
 
 (defun erlang-ts-toggle-indent-function ()
   "Toggle between tree-sitter and erlang-mode indentation."
