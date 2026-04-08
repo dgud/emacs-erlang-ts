@@ -944,6 +944,8 @@ Use (setq lsp-enable-imenu nil) to disable lsp-imenu"
   (erlang-ts-imenu-setup)
 
   (treesit-major-mode-setup)
+  (when (not erlang-ts-use-treesit-indent)  ;; Toggle back erlang.el indentation
+    (erlang-ts-toggle-indent-function))
   (setq-local syntax-propertize-function #'erlang-ts--syntax-propertize))
 
 
