@@ -664,7 +664,11 @@ corresponding indentation offset to `erlang-ts--indent-offset'"
      ((equal type "function_clause")
       (setq-local erlang-ts--indent-offset erlang-indent-level)
       (treesit-node-start gp))
+;     ((equal type "cr_clause")
+;      (setq-local erlang-ts--indent-offset erlang-indent-level)
+;      (treesit-node-start gp))
      (t
+      (message "clause body: %s %s %s" gp (treesit-node-parent gp) (treesit-node-start (treesit-node-parent gp)))
       (setq-local erlang-ts--indent-offset (* 2 erlang-indent-level))
       (treesit-node-start (treesit-node-parent gp))))))
 
@@ -764,44 +768,126 @@ The return value is suitable for `treesit-simple-indent-rules'."
      ((parent-is "type_sig") parent-bol erlang-indent-level)
 
      ;; Top-level: column 0
-     ((parent-is "source_file") erlang-ts--top-level erlang-ts--indent-offset)
+     ((node-is "fun_decl") column-0 0)
+     ((parent-is "source_file") erlang-ts--indent-top-level erlang-ts--indent-offset)
 
      ;; Error recovery
      ((parent-is "ERROR") erlang-ts--indent-error erlang-ts--indent-offset)
 
      ;; Catch-all: preserve previous line indentation
-     (no-node prev-line 0))))
+     (no-node prev-line 0)
 
-(defun erlang-ts--indent-top-level (_node _parent _bol &rest _)
+     ;; DEBUG
+     (my-debug column-0 0))))
+
+(defun my-debug (node parent _bol &rest _)
+  "DEBUG function, prints NODE, PARENT and BOL."
+  (message "NODE %s PARENT %s" (treesit-node-type node) parent)
+  nil)
+
+(defun erlang-ts--indent-top-level (node _parent _bol &rest _)
   "Return anchor point for top level.
 Top level is invoked either on top level or after an incomplete
 construction, tries to figure out if `point' is on top level or not.
 If top-level return 0 and sets `erlang-ts--indent-offset' to 0,
 if not invokes `erlang-ts--indent-guess' with previous tree node"
-  
-  (erlang-ts--indent-guess (treesit-node-parent parent)))
+  (setq-local erlang-ts--indent-offset 0)
+  (save-excursion
+    (forward-line -1)
+    (end-of-line)
+    (let* ((new_node (treesit-node-at (point)))
+           (type (treesit-node-type new_node))
+           (parent (treesit-node-parent new_node)))
+      (message "TOP %s %s %s %s " node (point) new_node parent)
+      (cond
+       ((equal type ".")
+        0)
+       ((and
+         (equal type ";")
+         (equal (treesit-node-type parent) "func_decl"))
+        0)
+       ((and
+         (equal type ",")
+         (equal (treesit-node-type parent) "func_decl"))
+        0)
+       ((and
+         (equal type "atom")
+         (equal (treesit-node-type parent) "function_clause"))
+        0)
 
+       ;; Specs and types might be added here
+       (t
+        (erlang-ts--indent-guess
+         (erlang-ts--find-surroundings (list node new_node parent))))))))
 
-(defun erlang-ts--indent-error (_node parent _bol &rest _)
+(defun erlang-ts--indent-error (node parent bol &rest _)
   "Best effort guessing anchor point from PARENT.
 Invokes erlang-ts--indent-guess which returns an anchor point and
 also sets `erlang-ts--indent-offset'"
-  (erlang-ts--indent-guess (treesit-node-parent parent)))
+  (let ((gp (treesit-node-parent parent)))
+    (cond ((equal (treesit-node-type gp) "source_file")
+           (erlang-ts--indent-top-level node parent bol))
+          (t (erlang-ts--indent-guess (erlang-ts--find-surroundings (list node parent)))))))
 
-(defun erlang-ts--indent-guess (node)
+(defun erlang-ts--find-surroundings (nodes)
+  (message "SURR %s" nodes)
+  (let ((node (erlang-ts--first-node nodes)))
+    (if (not node) nil
+      (let ((type (erlang-ts--node-type node))
+            (parent (treesit-node-parent node))
+            )
+        (message "  Surr: %s %s" node parent)
+        (cond
+         ((equal "ERROR" (treesit-node-type parent))
+          (cons type (erlang-ts--find-previous-node (treesit-node-start parent))))
+         (t (cons type (erlang-ts--interesting-node parent))) )))))
+
+(defun erlang-ts--node-type (node)
+  (let ((type (treesit-node-type node)))
+    (cond
+     ((equal type ",") (cons "delimiter" node))
+     ((equal type ";") (cons "delimiter" node))
+     ((equal type ".") (cons "delimiter" node))
+     ((equal type "(") (cons "bracket" node))
+     ((equal type "{") (cons "bracket" node))
+     ((equal type "[") (cons "bracket" node))
+     (t (message "Unknown node %s" type)
+        (cons "unknown" node)
+        ))))
+
+(defun erlang-ts--first-node (nodes)
+  (if (not nodes) nil
+    (if (car nodes)
+        (car nodes)
+      (erlang-ts--first-node (cdr nodes)))))
+
+(defun erlang-ts--find-previous-node (pos)
+  (save-excursion
+    (goto-char (- pos 1))
+    (erlang-ts--interesting-node (treesit-node-at (point)))))
+
+(defun erlang-ts--interesting-node (node)
+  (let ((type (treesit-node-type node)))
+    (message "Interesting %s" type)
+    (cond
+     ((equal type "fun_decl") node)
+     ((equal type "function_clause") node)
+     ((equal type "source_file") node)
+     (t (erlang-ts--interesting-node (treesit-node-parent node))))))
+
+(defun erlang-ts--indent-guess (surrounding)
   "Guess an anchor point depending on NODE.
 Also sets `erlang-ts--indent-offset'."
   (setq-local erlang-ts--indent-offset erlang-indent-level)
-  (let* ((gp (treesit-node-parent parent))
-         (type (treesit-node-type gp)))
-    (cond ((equal "source-file" type)
-           (setq-local erlang-ts--indent-offset 0)
-           0)
-          ((equal "function_clause" type)
-           (treesit-node-start gp))
+  (message "Guess %s " surrounding)
+  (let* ((etype (caar surrounding))
+         (node  (cdar surrounding))
+         (parent (cdr surrounding)))
+    (cond ((equal "delimiter" etype)
+           (treesit-node-start parent))
           (t
-           (message "erlang-ts guess: unhandled %s" type)
-           (treesit-node-start gp)))))
+           (message "erlang-ts guess: unhandled %s" etype)
+           (treesit-node-start parent)))))
 
 (defun erlang-ts-toggle-indent-function ()
   "Toggle between tree-sitter and erlang-mode indentation."
@@ -944,8 +1030,8 @@ Use (setq lsp-enable-imenu nil) to disable lsp-imenu"
   (erlang-ts-imenu-setup)
 
   (treesit-major-mode-setup)
-  (when (not erlang-ts-use-treesit-indent)  ;; Toggle back erlang.el indentation
-    (erlang-ts-toggle-indent-function))
+;  (when (not erlang-ts-use-treesit-indent)  ;; Toggle back erlang.el indentation
+;    (erlang-ts-toggle-indent-function))
   (setq-local syntax-propertize-function #'erlang-ts--syntax-propertize))
 
 
